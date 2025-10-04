@@ -1,0 +1,562 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Noah's Rescue — A Sweet Game</title>
+<style>
+  :root{
+    --bg:#efe7df;
+    --panel:#f3e9e1;
+    --accent:#6b4f3a;
+    --accent-2:#c47b51;
+    --text:#3e2c23;
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%}
+  body{
+    margin:0;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    background:linear-gradient(180deg,#f5eee6,#efe7df);
+    font-family:system-ui,Segoe UI,Roboto,Arial;
+    color:var(--text);
+  }
+  .wrap{
+    width:980px;
+    max-width:98%;
+    background:var(--panel);
+    border-radius:14px;
+    padding:14px;
+    box-shadow:0 18px 40px rgba(0,0,0,0.12);
+    display:grid;
+    grid-template-columns:1fr 300px;
+    gap:14px;
+  }
+  canvas{
+    width:100%;
+    background: linear-gradient(#fffef6,#fff6ee);
+    border-radius:10px;
+    display:block;
+    outline:none;
+  }
+  .sidebar{padding:10px;display:flex;flex-direction:column;gap:12px;}
+  .hud{background:#fff;border-radius:10px;padding:10px;box-shadow:inset 0 1px 0 rgba(255,255,255,0.6)}
+  .title{font-weight:700;font-size:18px;color:var(--accent)}
+  .small{font-size:13px;color:#7a6257}
+  button{background:var(--accent);color:#fff;border:none;padding:8px 12px;border-radius:10px;cursor:pointer;font-weight:600}
+  .log{height:120px;overflow:auto;padding:6px;background:#fff7f2;border-radius:8px;font-size:13px}
+  footer{font-size:12px;color:#7a6257;margin-top:auto}
+  @media (max-width:920px){ .wrap{grid-template-columns:1fr} }
+  /* modal */
+  .modal {
+    position:fixed; inset:0; display:flex; align-items:center; justify-content:center;
+    background:rgba(0,0,0,0.45); z-index:9999;
+  }
+  .card {
+    background:#fffdf6; border-radius:10px; padding:18px; width:min(680px,92%); box-shadow:0 12px 30px rgba(0,0,0,0.2);
+    color:var(--text); font-family: Georgia, serif;
+  }
+  .btn-close { background:#6b4f3a; color:#fff; border:none; padding:8px 12px; border-radius:8px; cursor:pointer }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div>
+    <canvas id="game" width="720" height="540" tabindex="0"></canvas>
+  </div>
+
+  <div class="sidebar">
+    <div class="hud">
+      <div class="title">Noah's Little Quest — Rescue Desmond</div>
+      <div class="small">Collect all hearts each level. Use Arrow keys or WASD. Interact: E. Restart: R.</div>
+    </div>
+
+    <div class="hud">
+      <div><strong>Level:</strong> <span id="levelDisp">1</span> / 10</div>
+      <div><strong>Score:</strong> <span id="score">0</span></div>
+      <div><strong>Hearts left:</strong> <span id="left">0</span></div>
+      <div><strong>Health:</strong> <span id="health">5</span></div>
+    </div>
+
+    <div class="hud">
+      <div class="title" style="font-size:14px">Controls</div>
+      <div class="small">Move: Arrow keys or WASD</div>
+      <div class="small">Interact (open message when all hearts): <strong>E</strong></div>
+      <div class="small">Restart: <strong>R</strong></div>
+    </div>
+
+    <div class="hud log" id="log">
+      <div><em>Welcome Noah! Collect hearts — each one gives you a sweet compliment.</em></div>
+    </div>
+
+    <div style="display:flex;gap:8px">
+      <button id="hintBtn">Hint</button>
+      <button id="restartBtn">Restart</button>
+    </div>
+
+    <footer>Made with ❤️ — Customize the notes & visuals in the code</footer>
+  </div>
+</div>
+
+<!-- Soft background music -->
+<audio id="bgMusic" loop preload="auto">
+  <!-- Default gentle instrumental - replace URL with any mp3 you'd like -->
+  <source src="https://cdn.pixabay.com/download/audio/2021/08/04/audio_1d8692d0f6.mp3?filename=acoustic-guitar-ambient-10953.mp3" type="audio/mpeg">
+</audio>
+
+<script>
+/* Game with 10 levels, hearts instead of stars, compliments on collection,
+   player drawn as blond boy with glasses, ending rescues Desmond (emo, taller).
+*/
+
+const canvas = document.getElementById('game');
+const ctx = canvas.getContext('2d');
+const W = canvas.width, H = canvas.height;
+
+const scoreEl = document.getElementById('score');
+const leftEl = document.getElementById('left');
+const healthEl = document.getElementById('health');
+const levelDisp = document.getElementById('levelDisp');
+const logEl = document.getElementById('log');
+const bgMusic = document.getElementById('bgMusic');
+
+let score = 0, health = 5, collected = 0, totalHearts = 0;
+let level = 1, maxLevels = 10;
+let gameOver = false, win = false;
+
+// player object
+const player = { x:60, y: H/2, w:30, h:38, speed:2.6, vx:0, vy:0, invincible:false, invTimer:0 };
+
+// enemies array
+let enemies = [];
+
+// hearts
+let hearts = [];
+
+// Desmond (final rescued NPC)
+const desmond = { x: W-120, y: H/2 - 24, w:34, h:46, present:false, rescued:false };
+
+// compliments to show each time a heart is collected (will pick sequential/random)
+const compliments = [
+  "Noah — your smile makes my day brighter.",
+  "You are so brave and kind; I love you.",
+  "Your laugh is my favorite sound.",
+  "You make everything better just by being you.",
+  "I admire how thoughtful you are.",
+  "Your hugs are my favorite place.",
+  "You inspire me every day.",
+  "You're gentle, funny, and perfect for me.",
+  "I love how you always try your best.",
+  "You are my sweetest comfort."
+];
+
+// notes for when opening door after collecting hearts
+const levelNotes = [
+  "Nice work, Noah — another level down! I'm so proud of you.",
+  "You're doing amazing. Keep going, baby!",
+  "That was beautiful. I miss you so much.",
+  "You're unstoppable. My heart swells for you.",
+  "Each heart you collect is one more reason I love you.",
+  "Sweet victory — let's keep rescuing each other.",
+  "You're my hero. Little steps, big love.",
+  "Can't believe how perfect you are — keep shining.",
+  "Almost there — just one more level to go after this.",
+  "This is it. One more push to Desmond."
+];
+
+// audio auto-start attempt - many browsers block autoplay unless user interacts
+function tryPlayMusic(){
+  bgMusic.volume = 0.22;
+  bgMusic.play().catch(()=>{/* will require user gesture; fine */});
+}
+
+// util: log message in sidebar
+function log(txt){ const d=document.createElement('div'); d.textContent = txt; logEl.prepend(d); }
+
+// keyboard
+const keys = {};
+window.addEventListener('keydown', e=>{
+  keys[e.key.toLowerCase()] = true;
+  if(["ArrowUp","ArrowDown","ArrowLeft","ArrowRight"," "].includes(e.key)) e.preventDefault();
+  if(e.key.toLowerCase()==='e') tryInteract();
+  if(e.key.toLowerCase()==='r') initLevel(level);
+});
+window.addEventListener('keyup', e => keys[e.key.toLowerCase()] = false);
+
+// collisions
+function collideRect(a,b){ return !(a.x+a.w < b.x || a.x > b.x+b.w || a.y+a.h < b.y || a.y > b.y+b.h); }
+
+// generate hearts for this level (red & blue hearts)
+function spawnHearts(levelNum){
+  hearts = [];
+  // increase hearts with level (base 3 + level)
+  const count = Math.min(3 + levelNum, 16);
+  for(let i=0;i<count;i++){
+    // distribute in free positions
+    const size = 16;
+    const x = 80 + Math.random()*(W - 180);
+    const y = 60 + Math.random()*(H - 120);
+    const color = (Math.random() < 0.5) ? 'red' : 'dodgerblue';
+    hearts.push({x,y,r:size,color,taken:false});
+  }
+  totalHearts = hearts.length;
+  collected = 0;
+  leftEl.textContent = totalHearts - collected;
+}
+
+// spawn enemies according to level difficulty
+function spawnEnemies(levelNum){
+  enemies = [];
+  // base enemies 1, +1 every 2 levels
+  const base = 1 + Math.floor((levelNum-1)/2);
+  for(let i=0;i<base;i++){
+    // random patrol area
+    const w=32,h=36;
+    const minX = 160 + Math.random()*200;
+    const maxX = minX + 160 + Math.random()*120;
+    const y = 60 + Math.random()*(H-120);
+    const speed = 0.9 + levelNum*0.15 + Math.random()*0.3;
+    enemies.push({x:minX, y, w, h, dir:1, rangeX: [minX, Math.min(maxX,W-120)], speed});
+  }
+}
+
+// reset / init level
+function initLevel(l){
+  level = l;
+  levelDisp.textContent = level;
+  score = score; // keep cumulative
+  health = Math.max(health, 1); // don't zero out unless lost
+  player.x = 60; player.y = H/2; player.invincible=false;
+  desmond.present = (level === maxLevels); // present only on final level as goal
+  desmond.rescued = false;
+  spawnHearts(level);
+  spawnEnemies(level);
+  leftEl.textContent = totalHearts - collected;
+  healthEl.textContent = health;
+  scoreEl.textContent = score;
+  gameOver = false;
+  win = false;
+  log(`Level ${level} started. Hearts: ${totalHearts}. Enemies: ${enemies.length}.`);
+  tryPlayMusic();
+}
+
+// update
+function update(){
+  if(gameOver) return;
+  // movement
+  let mx=0,my=0;
+  if(keys['arrowleft']||keys['a']) mx -= 1;
+  if(keys['arrowright']||keys['d']) mx += 1;
+  if(keys['arrowup']||keys['w']) my -= 1;
+  if(keys['arrowdown']||keys['s']) my += 1;
+  if(mx!==0 && my!==0){ mx *= Math.SQRT1_2; my *= Math.SQRT1_2; }
+  player.vx = mx * player.speed;
+  player.vy = my * player.speed;
+  player.x += player.vx; player.y += player.vy;
+  player.x = Math.max(8, Math.min(W-player.w-8, player.x));
+  player.y = Math.max(8, Math.min(H-player.h-8, player.y));
+
+  // enemy patrol
+  for(let en of enemies){
+    en.x += en.speed * en.dir;
+    if(en.x < en.rangeX[0] || en.x > en.rangeX[1]) en.dir *= -1;
+    // collision with player
+    if(collideRect(player,en)){
+      if(!player.invincible){
+        health -= 1; healthEl.textContent = health;
+        player.invincible = true; player.invTimer = 60;
+        log("Ouch — you bumped into an enemy. Health -1.");
+        // push back
+        player.x -= en.dir * 28;
+      }
+    }
+  }
+  if(player.invincible){
+    player.invTimer--;
+    if(player.invTimer<=0) player.invincible = false;
+  }
+
+  // collect hearts
+  for(let h of hearts){
+    if(!h.taken){
+      const hb = {x:h.x-10,y:h.y-10,w:20,h:20};
+      if(collideRect(player, hb)){
+        h.taken = true;
+        collected++; score += 5; scoreEl.textContent = score;
+        leftEl.textContent = totalHearts - collected;
+        // show compliment (choose random)
+        const c = compliments[Math.floor(Math.random()*compliments.length)];
+        // small popup compliment
+        showTinyCompliment(c);
+        log(`Collected a heart — ${c}`);
+      }
+    }
+  }
+
+  // check health
+  if(health <= 0){
+    gameOver = true;
+    showModal("Oh no — you ran out of health! Press R to restart this level.", "Try Again");
+  }
+
+  // level complete if all hearts collected -> prompt to interact (E) to open note & proceed
+  if(collected >= totalHearts && !desmond.present){
+    // all hearts collected - let player press E to advance (we automatically pop a congrats modal)
+    // but we show a gentle "press E to open note" message as hint
+    // (tryInteract handles giving the level note)
+  }
+
+  // final rescue check (if desmond present on last level)
+  if(desmond.present && collected >= totalHearts && !desmond.rescued){
+    // if player touches Desmond area after collecting hearts
+    if(collideRect(player, desmond)){
+      desmond.rescued = true;
+      win = true;
+      showFinalScene();
+    }
+  }
+}
+
+// try interact (E): if all hearts collected, show level note and advance when closed
+function tryInteract(){
+  if(collected >= totalHearts && !gameOver){
+    // show the level note (from levelNotes)
+    const noteIndex = Math.min(level-1, levelNotes.length-1);
+    showModal(levelNotes[noteIndex], "Nice! Continue", ()=> {
+      // when modal closed, advance to next level (if not last)
+      if(level < maxLevels){
+        initLevel(level+1);
+      } else {
+        // on last level, if desmond present, player must meet him to finish
+        if(!desmond.present){
+          desmond.present = true;
+        }
+      }
+    });
+  } else {
+    log("Keep collecting hearts — then press E to see a special note!");
+  }
+}
+
+// small compliment popup (temporary, non-blocking)
+function showTinyCompliment(txt){
+  const badge = document.createElement('div');
+  badge.style.position='fixed';
+  badge.style.left='50%';
+  badge.style.transform='translateX(-50%)';
+  badge.style.bottom='80px';
+  badge.style.background='rgba(255,250,240,0.95)';
+  badge.style.padding='10px 14px';
+  badge.style.borderRadius='999px';
+  badge.style.boxShadow='0 8px 18px rgba(0,0,0,0.18)';
+  badge.style.fontFamily='Georgia, serif';
+  badge.style.zIndex=9998;
+  badge.textContent = txt;
+  document.body.appendChild(badge);
+  setTimeout(()=> badge.style.opacity = '0', 2500);
+  setTimeout(()=> document.body.removeChild(badge), 3000);
+}
+
+// modal show
+function showModal(message, buttonText="Close", onClose=null){
+  const overlay = document.createElement('div');
+  overlay.className = 'modal';
+  const c = document.createElement('div'); c.className='card';
+  c.innerHTML = `<div style="font-size:18px;margin-bottom:10px">${message}</div><div style="display:flex;justify-content:flex-end"><button class="btn-close">${buttonText}</button></div>`;
+  overlay.appendChild(c);
+  document.body.appendChild(overlay);
+  c.querySelector('.btn-close').addEventListener('click', ()=>{
+    document.body.removeChild(overlay);
+    if(onClose) onClose();
+  });
+}
+
+// final rescue scene
+function showFinalScene(){
+  // pause game, show sweet final modal and heart over both characters
+  showModal("You found Desmond! ❤️ You saved him. You two are together now.", "Celebrate", ()=> {
+    // little confetti drawn? we will mark win and overlay heart in draw loop
+    log("You rescued Desmond — love wins! 💖");
+  });
+}
+
+// draw
+function draw(){
+  ctx.clearRect(0,0,W,H);
+  // base bg
+  ctx.fillStyle = '#fffaf3';
+  ctx.fillRect(0,0,W,H);
+  // decorative ribbon
+  ctx.fillStyle = '#f0e1d4';
+  ctx.fillRect(220,0,120,H);
+
+  // draw hearts
+  for(let h of hearts){
+    if(!h.taken){
+      drawHeart(h.x, h.y, h.color);
+    } else {
+      // faint
+      drawHeart(h.x, h.y, 'rgba(200,200,200,0.22)');
+    }
+  }
+
+  // draw enemies
+  for(let en of enemies){
+    ctx.fillStyle = '#b03e2e';
+    roundRect(ctx, en.x, en.y, en.w, en.h, 6, true, false);
+    // simple eye
+    ctx.fillStyle = '#fff'; ctx.fillRect(en.x + 6, en.y + 8, 6, 6);
+    ctx.fillStyle = '#000'; ctx.fillRect(en.x + 8, en.y + 10, 3, 3);
+  }
+
+  // draw door (for non-final levels) at right side
+  if(!desmond.present){
+    const doorX = W-72, doorY = H/2 - 40;
+    ctx.fillStyle = (collected >= totalHearts) ? '#c47b51' : '#8b5e3c';
+    roundRect(ctx, doorX, doorY, 48, 80, 6, true, false);
+    ctx.fillStyle = '#ffd86b';
+    ctx.beginPath(); ctx.arc(doorX+8, doorY+40, 4, 0, Math.PI*2); ctx.fill();
+  }
+
+  // draw Desmond if present (final level)
+  if(desmond.present){
+    drawDesmond(desmond.x, desmond.y);
+  }
+
+  // draw player (Noah) - blond boy with glasses
+  drawNoah(player.x, player.y);
+
+  // HUD overlay small
+  ctx.fillStyle = 'rgba(255,255,255,0.65)';
+  ctx.fillRect(8,8,220,44);
+  ctx.fillStyle = '#3e2c23';
+  ctx.font = '14px system-ui';
+  ctx.fillText('Score: ' + score, 16, 28);
+  ctx.fillText('Hearts left: ' + (totalHearts - collected), 120, 28);
+
+  // if invincible flicker
+  if(player.invincible){
+    // subtle blink effect already applied in drawNoah via alpha if desired
+  }
+
+  // if win and rescues show heart above both characters
+  if(win && desmond.rescued){
+    // heart above midpoint between them
+    const hx = (player.x + desmond.x)/2 + 10;
+    const hy = Math.min(player.y, desmond.y) - 18;
+    drawHeart(hx, hy, 'red', 28);
+    // small message on canvas
+    ctx.fillStyle = '#3e2c23';
+    ctx.font = '20px Georgia';
+    ctx.fillText('Together 💖', W/2 - 60, 40);
+  }
+
+  // game over overlay
+  if(gameOver){
+    ctx.fillStyle = 'rgba(0,0,0,0.3)';
+    ctx.fillRect(0,0,W,H);
+  }
+}
+
+// draw Noah (simple cartoon blond boy with glasses)
+function drawNoah(x,y){
+  ctx.save();
+  if(player.invincible && Math.floor(player.invTimer/6) % 2 === 0) ctx.globalAlpha = 0.5;
+  // body
+  ctx.fillStyle = '#f3d9b6'; // skin
+  roundRect(ctx, x+6, y+14, 18, 22, 6, true, false);
+  // shirt
+  ctx.fillStyle = '#8b5e3c';
+  roundRect(ctx, x, y+28, player.w, 10, 6, true, false);
+  // head
+  ctx.beginPath(); ctx.ellipse(x+15, y+8, 12, 10, 0, 0, Math.PI*2); ctx.fillStyle='#f3d9b6'; ctx.fill();
+  // blond hair (fringe)
+  ctx.fillStyle = '#f5e09d';
+  ctx.beginPath(); ctx.moveTo(x+3,y); ctx.quadraticCurveTo(x+18,y-8,x+28,y+2); ctx.lineTo(x+28,y+10); ctx.lineTo(x+3,y+10); ctx.fill();
+  // glasses
+  ctx.strokeStyle='#000'; ctx.lineWidth=2;
+  ctx.strokeRect(x+4, y+4, 10, 8);
+  ctx.strokeRect(x+16, y+4, 10, 8);
+  ctx.beginPath(); ctx.moveTo(x+14,y+8); ctx.lineTo(x+16,y+8); ctx.stroke();
+  // eyes
+  ctx.fillStyle='#000'; ctx.fillRect(x+7, y+7, 3, 3); ctx.fillRect(x+19, y+7, 3, 3);
+  ctx.restore();
+}
+
+// draw Desmond - taller, brown hair, emo vibe (simple)
+function drawDesmond(x,y){
+  ctx.save();
+  // body
+  ctx.fillStyle = '#e3d8cf';
+  roundRect(ctx, x+6, y+14, 22, 26, 6, true, false);
+  // shirt (dark emo)
+  ctx.fillStyle = '#303030';
+  roundRect(ctx, x, y+30, desmond.w+8, 12, 6, true, false);
+  // head
+  ctx.beginPath(); ctx.ellipse(x+16, y+8, 13, 11, 0, 0, Math.PI*2); ctx.fillStyle='#e3d8cf'; ctx.fill();
+  // hair (brown emo fringe)
+  ctx.fillStyle = '#3b2b2b';
+  ctx.beginPath(); ctx.moveTo(x+32,y+0); ctx.quadraticCurveTo(x+10,y+6,x+2,y+12); ctx.lineTo(x+2,y+2); ctx.fill();
+  // eye - one covered slightly
+  ctx.fillStyle='#000'; ctx.fillRect(x+10, y+8, 3, 3); ctx.fillRect(x+18, y+8, 3, 3);
+  ctx.restore();
+}
+
+// helper draw heart
+function drawHeart(cx, cy, color='red', size=18){
+  ctx.save();
+  ctx.translate(cx, cy);
+  ctx.scale(size/18, size/18);
+  ctx.beginPath();
+  ctx.moveTo(0, -6);
+  ctx.bezierCurveTo(6, -22, 34, -18, 0, 18);
+  ctx.bezierCurveTo(-34, -18, -6, -22, 0, -6);
+  ctx.closePath();
+  ctx.fillStyle = color;
+  ctx.fill();
+  ctx.restore();
+}
+
+// helper rounded rect
+function roundRect(ctx,x,y,w,h,r,fill,stroke){
+  if(typeof r==='undefined') r=6;
+  ctx.beginPath();
+  ctx.moveTo(x+r,y);
+  ctx.arcTo(x+w,y,x+w,y+h,r);
+  ctx.arcTo(x+w,y+h,x,y+h,r);
+  ctx.arcTo(x,y+h,x,y,r);
+  ctx.arcTo(x,y,x+w,y,r);
+  ctx.closePath();
+  if(fill) ctx.fill();
+  if(stroke) ctx.stroke();
+}
+
+// main loop
+function loop(){
+  update();
+  draw();
+  requestAnimationFrame(loop);
+}
+
+// bind buttons
+document.getElementById('hintBtn').addEventListener('click', ()=> {
+  log("Hint: collect all hearts. Then press E to open a sweet note and advance the level. On last level find Desmond!");
+});
+document.getElementById('restartBtn').addEventListener('click', ()=> {
+  initLevel(1);
+  score = 0; scoreEl.textContent = score;
+});
+
+// start game at level 1
+initLevel(1);
+loop();
+canvas.addEventListener('click', ()=> {
+  canvas.focus();
+  tryPlayMusic(); // user gesture may allow music
+});
+
+</script>
+</body>
+</html>
